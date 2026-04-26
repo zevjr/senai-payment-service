@@ -1,0 +1,81 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: dsmd-postgres
+    environment:
+      POSTGRES_USER: dsmd
+      POSTGRES_PASSWORD: dsmd123
+      POSTGRES_DB: payment_db
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - dsmd-network
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U dsmd -d payment_db']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: dsmd-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: dsmd
+      RABBITMQ_DEFAULT_PASS: dsmd123
+    ports:
+      - '5672:5672'
+      - '15672:15672'
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - dsmd-network
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  payment-service:
+    build:
+      context: ./ms-payment-service
+      dockerfile: Dockerfile
+    container_name: dsmd-payment-service
+    environment:
+      DATABASE_URL: postgresql://dsmd:dsmd123@postgres:5432/payment_db
+      RABBITMQ_URL: amqp://dsmd:dsmd123@rabbitmq:5672
+      PORT: 3001
+    ports:
+      - '3001:3001'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - dsmd-network
+
+  notification-service:
+    build:
+      context: ./ms-notification-service
+      dockerfile: Dockerfile
+    container_name: dsmd-notification-service
+    environment:
+      RABBITMQ_URL: amqp://dsmd:dsmd123@rabbitmq:5672
+      PORT: 3002
+    ports:
+      - '3002:3002'
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - dsmd-network
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+
+networks:
+  dsmd-network:
+    driver: bridge
